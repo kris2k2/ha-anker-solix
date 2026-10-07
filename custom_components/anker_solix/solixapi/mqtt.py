@@ -14,7 +14,6 @@ import ssl
 import tempfile
 from typing import Any
 
-import aiofiles
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
@@ -558,14 +557,17 @@ class AnkerSolixMqttSession:
                     with contextlib.suppress(Exception):
                         Path(filename).unlink()
                 # Cache login response in file for reuse
-                async with aiofiles.open(filename, "w", encoding="utf-8") as certfile:
-                    await certfile.write(self.mqtt_info.get(certname))
-                    self._logger.debug(
-                        "Api %s MQTT session certificate dumped to file: %s",
-                        self.apisession.nickname,
-                        filename,
-                    )
-                    self._temp_cert_files.append(filename)
+                await asyncio.to_thread(
+                    Path(filename).write_text,
+                    self.mqtt_info.get(certname),
+                    encoding="utf-8",
+                )
+                self._logger.debug(
+                    "Api %s MQTT session certificate dumped to file: %s",
+                    self.apisession.nickname,
+                    filename,
+                )
+                self._temp_cert_files.append(filename)
             # Configure SSL/TLS using temporary files
             if len(self._temp_cert_files) == 3:
                 # run this in loop executor to avoid blocking calls to files
@@ -1005,16 +1007,18 @@ class AnkerSolixMqttSession:
             starttime = None
         try:
             if Path(filename).is_file():
-                async with aiofiles.open(filename, encoding="utf-8") as file:
-                    async for line in file:
-                        message = json.loads(line.strip())
-                        if isinstance(message, dict):
-                            msgtime = str(message.pop("msg_time", ""))
-                            if not starttime:
-                                messages[msgtime] = message
-                            elif msgtime and msgtime >= starttime:
-                                messages[msgtime] = message
-                                return messages
+                text = await asyncio.to_thread(
+                    Path(filename).read_text, encoding="utf-8"
+                )
+                for line in text.splitlines():
+                    message = json.loads(line.strip())
+                    if isinstance(message, dict):
+                        msgtime = str(message.pop("msg_time", ""))
+                        if not starttime:
+                            messages[msgtime] = message
+                        elif msgtime and msgtime >= starttime:
+                            messages[msgtime] = message
+                            return messages
         except OSError as err:
             self._logger.error(
                 "ERROR: Failed to load MQTT messages from file %s\n%s", filename, err
@@ -1029,23 +1033,28 @@ class AnkerSolixMqttSession:
         if not isinstance(data, dict):
             data = {}
         try:
-            async with aiofiles.open(
-                filename, "a" if append else "w", encoding="utf-8"
-            ) as file:
-                # add message timestamp to data
-                await file.write(
-                    json.dumps(
-                        {
-                            "msg_time": datetime.now()
-                            .astimezone()
-                            .strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        | data
-                    )
-                    + "\n"
+            # add message timestamp to data
+            line = (
+                json.dumps(
+                    {
+                        "msg_time": datetime.now()
+                        .astimezone()
+                        .strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    | data
                 )
-                self._logger.debug("Saved MQTT message to file %s:", filename)
-                return True
+                + "\n"
+            )
+
+            def write_line() -> None:
+                with Path(filename).open(
+                    "a" if append else "w", encoding="utf-8"
+                ) as file:
+                    file.write(line)
+
+            await asyncio.to_thread(write_line)
+            self._logger.debug("Saved MQTT message to file %s:", filename)
+            return True
         except OSError as err:
             self._logger.error(
                 "ERROR: Failed to save MQTT message to file %s\n%s", filename, err

@@ -27,7 +27,6 @@ import string
 import tempfile
 from typing import Any
 
-import aiofiles
 from aiohttp.client_exceptions import ClientError
 
 from . import api, errors
@@ -2108,12 +2107,13 @@ class AnkerSolixApiExport:
                 d = d_copy
 
         try:
-            async with aiofiles.open(filename, "w", encoding="utf-8") as file:
-                await file.write(json.dumps(d, indent=2))
-                self._logger.info(
-                    "Saved JSON to file %s",
-                    filename.replace(str(self.export_path), str(self.export_folder)),
-                )
+            await asyncio.to_thread(
+                Path(filename).write_text, json.dumps(d, indent=2), encoding="utf-8"
+            )
+            self._logger.info(
+                "Saved JSON to file %s",
+                filename.replace(str(self.export_path), str(self.export_folder)),
+            )
         except OSError as err:
             self._logger.error(
                 "ERROR: Failed to save JSON to file %s: %s",
