@@ -17,7 +17,6 @@ import tempfile
 from types import SimpleNamespace
 from typing import Any
 
-import aiofiles
 from aiohttp import ClientSession, ClientTimeout
 from aiohttp.client_exceptions import ClientError
 from cryptography.hazmat.backends import default_backend
@@ -418,10 +417,13 @@ class AnkerSolixClientSession:
             )
             self._loggedIn = True
             # Cache login response in file for reuse
-            async with aiofiles.open(self._authFile, "w", encoding="utf-8") as authfile:
-                await authfile.write(json.dumps(data, indent=2, skipkeys=True))
-                self._logger.debug("Response cached in file: %s", self._authFile)
-                self._authFileTime = Path(self._authFile).stat().st_mtime
+            await to_thread(
+                Path(self._authFile).write_text,
+                json.dumps(data, indent=2, skipkeys=True),
+                encoding="utf-8",
+            )
+            self._logger.debug("Response cached in file: %s", self._authFile)
+            self._authFileTime = Path(self._authFile).stat().st_mtime
 
         # Update the login params
         self._login_response = dict(data)
@@ -842,18 +844,18 @@ class AnkerSolixClientSession:
             masked_filename = filename
         try:
             if Path(filename).is_file():
-                async with aiofiles.open(filename, encoding="utf-8") as file:
-                    data = json.loads(await file.read() or "{}")
-                    self._logger.debug("Loaded JSON from file %s:", masked_filename)
-                    self._logger.debug(
-                        "Data: %s",
-                        self.mask_values(
-                            data,
-                            *_MASK_VALUES,
-                        ),
-                    )
-                    self.request_count.add(request_info=f"LOAD {masked_filename}")
-                    return data
+                text = await to_thread(Path(filename).read_text, encoding="utf-8")
+                data = json.loads(text or "{}")
+                self._logger.debug("Loaded JSON from file %s:", masked_filename)
+                self._logger.debug(
+                    "Data: %s",
+                    self.mask_values(
+                        data,
+                        *_MASK_VALUES,
+                    ),
+                )
+                self.request_count.add(request_info=f"LOAD {masked_filename}")
+                return data
         except OSError as err:
             self._logger.error(
                 "ERROR: Failed to load JSON from file %s\n%s", masked_filename, err
@@ -872,10 +874,11 @@ class AnkerSolixClientSession:
         if not data:
             data = {}
         try:
-            async with aiofiles.open(filename, "w", encoding="utf-8") as file:
-                await file.write(json.dumps(data, indent=2))
-                self._logger.debug("Saved JSON to file %s:", masked_filename)
-                return True
+            await to_thread(
+                Path(filename).write_text, json.dumps(data, indent=2), encoding="utf-8"
+            )
+            self._logger.debug("Saved JSON to file %s:", masked_filename)
+            return True
         except OSError as err:
             self._logger.error(
                 "ERROR: Failed to save JSON to file %s\n%s", masked_filename, err
