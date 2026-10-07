@@ -1,6 +1,6 @@
 """Anker Power/Solix Cloud API class to handle a client connection session for an account."""
 
-from asyncio import sleep
+from asyncio import sleep, to_thread
 from base64 import b64decode, b64encode
 import contextlib
 from datetime import datetime
@@ -18,7 +18,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import aiofiles
-import aiofiles.os
 from aiohttp import ClientSession, ClientTimeout
 from aiohttp.client_exceptions import ClientError
 from cryptography.hazmat.backends import default_backend
@@ -895,7 +894,7 @@ class AnkerSolixClientSession:
         else:
             masked_filename = filename
         try:
-            await aiofiles.os.remove(masked_filename)
+            await to_thread(os.remove, masked_filename)
             self._logger.debug("Remove modified JSON file %s:", masked_filename)
         except OSError as err:
             self._logger.error(
